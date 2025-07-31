@@ -13,9 +13,9 @@ import { Env, ChatMessage } from "./types";
 // https://developers.cloudflare.com/workers-ai/models/
 const MODEL_ID = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
-// Default system prompt
+// System prompt for NEC 2017 electrical code expertise
 const SYSTEM_PROMPT =
-  "You are a helpful, friendly assistant. Provide concise and accurate responses.";
+  "You are an expert electrical code tutor specializing in the National Electrical Code (NEC) 2017. You provide accurate, detailed explanations of electrical code requirements, safety practices, and installation standards. Always reference specific NEC sections when applicable and prioritize safety in your responses.";
 
 export default {
   /**
@@ -62,15 +62,54 @@ async function handleChatRequest(
       messages: ChatMessage[];
     };
 
+    // Get the latest user message for RAG context retrieval
+    const latestUserMessage = messages.filter(msg => msg.role === "user").pop();
+    
+    let enhancedMessages = [...messages];
+    
+    // If there's a user message, get relevant context from RAG
+    if (latestUserMessage) {
+      try {
+        // Use auto-RAG to get relevant electrical code context
+        const ragResponse = await env.ELECTRICAL_CODE_RAG.run(
+          "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+          {
+            messages: [
+              {
+                role: "system",
+                content: "You are retrieving relevant NEC 2017 electrical code information to help answer the user's question. Provide specific code sections and safety requirements."
+              },
+              {
+                role: "user",
+                content: latestUserMessage.content
+              }
+            ],
+            max_tokens: 512,
+          }
+        );
+        
+        // If we have RAG context, add it to the conversation
+        if (ragResponse && (ragResponse as any).response) {
+          const contextMessage: ChatMessage = {
+            role: "system",
+            content: `Relevant NEC 2017 context: ${(ragResponse as any).response}`
+          };
+          enhancedMessages.push(contextMessage);
+        }
+      } catch (ragError) {
+        console.warn("RAG lookup failed, proceeding without context:", ragError);
+      }
+    }
+
     // Add system prompt if not present
-    if (!messages.some((msg) => msg.role === "system")) {
-      messages.unshift({ role: "system", content: SYSTEM_PROMPT });
+    if (!enhancedMessages.some((msg) => msg.role === "system")) {
+      enhancedMessages.unshift({ role: "system", content: SYSTEM_PROMPT });
     }
 
     const response = await env.AI.run(
       MODEL_ID,
       {
-        messages,
+        messages: enhancedMessages,
         max_tokens: 1024,
       },
       {

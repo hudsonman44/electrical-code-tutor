@@ -14,8 +14,14 @@
   "observability": {
     "enabled": true
   },
-  "ai": {
-    "binding": "AI"
-  },
+  "ai": [
+    {
+      "binding": "AI"
+    },
+    {
+      "binding": "ELECTRICAL_CODE_RAG",
+      "model": "electrical-code-rag"
+    }
+  ],
   "upload_source_maps": true
 }

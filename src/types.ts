@@ -9,6 +9,11 @@ export interface Env {
   AI: Ai;
 
   /**
+   * Binding for the RAG (electrical-code-rag).
+   */
+  ELECTRICAL_CODE_RAG: Ai;
+
+  /**
    * Binding for static assets.
    */
   ASSETS: { fetch: (request: Request) => Promise<Response> };
