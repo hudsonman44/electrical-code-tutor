@@ -62,27 +62,29 @@ async function handleChatRequest(
       messages: ChatMessage[];
     };
 
-    // Add system prompt if not present
-    if (!messages.some((msg) => msg.role === "system")) {
-      messages.unshift({ role: "system", content: SYSTEM_PROMPT });
+    // Get the latest user message for AutoRAG query
+    const latestUserMessage = messages.filter(msg => msg.role === "user").pop();
+    
+    if (!latestUserMessage) {
+      return new Response(
+        JSON.stringify({ error: "No user message found" }),
+        {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        },
+      );
     }
 
-    const response = await env.AI.run(
-      MODEL_ID,
-      {
-        messages,
-        max_tokens: 1024,
+    // Use AutoRAG to get enhanced response with electrical code context
+    const response = await env.AI.autorag("electrical-code-rag").aiSearch({
+      query: latestUserMessage.content,
+      rewrite_query: true,
+      max_num_results: 5,
+      ranking_options: {
+        score_threshold: 0.3,
       },
-      {
-        returnRawResponse: true,
-        // Use AI Gateway with electrical-code-rag RAG capabilities
-        gateway: {
-          id: "electrical-code-rag", // Your AI Gateway ID with RAG
-          skipCache: false,      // Set to true to bypass cache
-          cacheTtl: 3600,        // Cache time-to-live in seconds
-        },
-      },
-    );
+      stream: true,
+    });
 
     // Return streaming response
     return response;
