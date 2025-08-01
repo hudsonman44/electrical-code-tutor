@@ -76,7 +76,7 @@ async function handleChatRequest(
     }
 
     // Use AutoRAG to get enhanced response with electrical code context
-    const response = await env.AI.autorag("electrical-code-rag").aiSearch({
+    const ragResponse = await env.AI.autorag("electrical-code-rag").aiSearch({
       query: latestUserMessage.content,
       rewrite_query: true,
       max_num_results: 5,
@@ -86,8 +86,77 @@ async function handleChatRequest(
       stream: true,
     });
 
-    // Return streaming response
-    return response;
+    // Transform AutoRAG streaming response to match frontend expectations
+    if (ragResponse.body) {
+      // Create a new ReadableStream to transform the response
+      const transformedStream = new ReadableStream({
+        start(controller) {
+          const reader = ragResponse.body!.getReader();
+          const decoder = new TextDecoder();
+          
+          const pump = async (): Promise<void> => {
+            try {
+              const { done, value } = await reader.read();
+              
+              if (done) {
+                controller.close();
+                return;
+              }
+              
+              // Decode the chunk
+              const chunk = decoder.decode(value, { stream: true });
+              
+              // Process SSE chunks from AutoRAG
+              const lines = chunk.split('\n');
+              for (const line of lines) {
+                if (line.trim() && !line.startsWith('data: [DONE]')) {
+                  try {
+                    // Parse AutoRAG SSE format
+                    const cleanLine = line.replace(/^data: /, '').trim();
+                    if (cleanLine) {
+                      const data = JSON.parse(cleanLine);
+                      
+                      // Transform to expected frontend format
+                      if (data.response) {
+                        const transformedData = JSON.stringify({ response: data.response });
+                        controller.enqueue(new TextEncoder().encode(transformedData + '\n'));
+                      }
+                    }
+                  } catch (e) {
+                    // Skip invalid JSON lines
+                    continue;
+                  }
+                }
+              }
+              
+              // Continue reading
+              return pump();
+            } catch (error) {
+              controller.error(error);
+            }
+          };
+          
+          pump();
+        }
+      });
+      
+      return new Response(transformedStream, {
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        },
+      });
+    }
+
+    // Fallback if no streaming body
+    return new Response(
+      JSON.stringify({ error: "No response received from AutoRAG" }),
+      {
+        status: 500,
+        headers: { "content-type": "application/json" },
+      },
+    );
   } catch (error) {
     console.error("Error processing chat request:", error);
     return new Response(
